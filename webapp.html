@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HILAL FRANCE — Carte des spots</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<style>
+  :root{--vf:#1a7f37;--nv:#2b6cb0}
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;font-family:system-ui,"Segoe UI",Roboto,Arial,sans-serif;color:#1b2530}
+  #app{display:flex;flex-direction:column;height:100%}
+  header{background:#0b2a4a;color:#fff;padding:8px 12px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;box-shadow:0 2px 6px rgba(0,0,0,.25);z-index:1000}
+  header .title{font-weight:700;font-size:16px}
+  header input[type=search]{flex:1;min-width:150px;max-width:300px;padding:7px 11px;border-radius:8px;border:0;font-size:14px}
+  header label{font-size:13px;display:inline-flex;align-items:center;gap:5px;cursor:pointer;user-select:none}
+  header .count{opacity:.85;font-size:13px;margin-left:auto}
+  #map{flex:1}
+  .legend{background:#fff;padding:8px 10px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.3);font-size:12px;line-height:1.7}
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .pop b{font-size:14px}
+  .pop .meta{color:#556;font-size:12px;margin:4px 0 8px}
+  .pop .links{display:flex;flex-wrap:wrap;gap:6px}
+  .pop a{font-size:12px;text-decoration:none;background:#eef3fb;color:#13386b;padding:5px 9px;border-radius:6px;border:1px solid #d6e2f3}
+  .badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:10px;color:#fff;margin-left:4px}
+  .locate{background:#fff;border:0;width:34px;height:34px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.3);font-size:17px;cursor:pointer;line-height:34px;text-align:center}
+</style>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+<div id="app">
+  <header>
+    <span class="title">🌙 HILAL FRANCE</span>
+    <input id="q" type="search" placeholder="Rechercher un lieu, une commune…">
+    <label><input type="checkbox" id="fv" checked> vérifiés</label>
+    <label><input type="checkbox" id="fn" checked> à explorer</label>
+    <span class="count" id="count">chargement…</span>
+  </header>
+  <div id="map"></div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();}
+function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function links(s){
+  var q=s.lat+','+s.lon, nom=encodeURIComponent(s.nom||'');
+  var maps='https://www.google.com/maps/search/?api=1&query='+q;
+  var sat='https://www.google.com/maps/place/'+q+'/@'+q+',17z/data=!3m1!1e3';
+  var earth='https://earth.google.com/web/search/'+q;
+  var pf='https://www.peakfinder.com/?lat='+s.lat+'&lng='+s.lon+'&azi=270.0&name='+nom;
+  if(s.alt) pf+='&ele='+s.alt;
+  return '<div class="links"><a href="'+maps+'" target="_blank">📍 Maps</a>'+
+    '<a href="'+sat+'" target="_blank">🛰️ Satellite</a>'+
+    '<a href="'+earth+'" target="_blank">🌍 Earth</a>'+
+    '<a href="'+pf+'" target="_blank">🔭 Horizon</a></div>';
+}
+function popup(s){
+  var v=s.st==='v';
+  var badge='<span class="badge" style="background:'+(v?'var(--vf)':'var(--nv)')+'">'+(v?'vérifié':'à explorer')+'</span>';
+  var meta=[]; if(s.com)meta.push(esc(s.com)); if(s.alt)meta.push(s.alt+' m');
+  if(s.prom)meta.push('proém. '+s.prom+' m'); if(s.sol)meta.push(esc(s.sol));
+  return '<div class="pop"><b>'+esc(s.nom)+'</b>'+badge+
+    '<div class="meta">'+meta.join(' · ')+(s.note?'<br>'+esc(s.note):'')+'</div>'+links(s)+'</div>';
+}
+function init(SPOTS){
+  var map=L.map('map',{preferCanvas:true}).setView([46.6,2.4],6);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    {attribution:'&copy; OpenStreetMap, &copy; CARTO',maxZoom:19,subdomains:'abcd'}).addTo(map);
+  var cluster=L.markerClusterGroup({maxClusterRadius:45,chunkedLoading:true});
+  function build(){
+    cluster.clearLayers();
+    var q=document.getElementById('q').value.trim().toLowerCase();
+    var fv=document.getElementById('fv').checked, fn=document.getElementById('fn').checked, n=0;
+    for(var i=0;i<SPOTS.length;i++){
+      var s=SPOTS[i];
+      if(s.st==='v'&&!fv) continue;
+      if(s.st!=='v'&&!fn) continue;
+      if(q && !((s.nom||'').toLowerCase().includes(q)||(s.com||'').toLowerCase().includes(q))) continue;
+      var m=L.circleMarker([s.lat,s.lon],{radius:s.st==='v'?7:5,color:'#fff',weight:1,
+        fillColor:s.st==='v'?css('--vf'):css('--nv'),fillOpacity:.9});
+      m.bindPopup(popup(s),{maxWidth:280}); cluster.addLayer(m); n++;
+    }
+    map.addLayer(cluster);
+    document.getElementById('count').textContent=n+' spots affichés';
+  }
+  ['q','fv','fn'].forEach(function(id){document.getElementById(id).addEventListener('input',build);});
+  build();
+  var lg=L.control({position:'bottomright'});
+  lg.onAdd=function(){var d=L.DomUtil.create('div','legend');
+    d.innerHTML='<div><i style="background:'+css('--vf')+'"></i>Vérifié (recommandé)</div>'+
+                '<div><i style="background:'+css('--nv')+'"></i>À explorer</div>';return d;};
+  lg.addTo(map);
+  var loc=L.control({position:'topright'});
+  loc.onAdd=function(){var b=L.DomUtil.create('button','locate');b.innerHTML='📍';b.title='Ma position';
+    L.DomEvent.on(b,'click',function(e){L.DomEvent.stop(e);map.locate({setView:true,maxZoom:12});});return b;};
+  loc.addTo(map);
+  map.on('locationfound',function(e){L.circleMarker(e.latlng,{radius:8,color:'#e23',fillColor:'#e23',fillOpacity:.7})
+    .addTo(map).bindPopup('Vous êtes ici').openPopup();});
+}
+fetch('spots.json',{cache:'no-store'}).then(function(r){return r.json();}).then(init).catch(function(e){document.getElementById('count').textContent='Erreur de chargement des données';});
+</script>
+<script>
+try {
+  var w = window.Telegram && window.Telegram.WebApp;
+  if (w) {
+    w.ready(); w.expand();
+    document.documentElement.style.setProperty('--tg', w.themeParams.bg_color || '');
+  }
+} catch (e) {}
+</script>
+</body>
+</html>
